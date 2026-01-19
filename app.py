@@ -51,14 +51,19 @@ def preprocess_data(df_raw, scaler_obj, encoder_obj, numerical_feats, categorica
         if col in df_processed.columns:
             df_processed = df_processed.drop(columns=[col])
             
-    # 2. Separate target variable 'num' (if present) for testing
+    # 2. Separate target variable if present ('num' from raw dataset or already-created 'target')
     if 'num' in df_processed.columns:
         df_processed['target'] = (df_processed['num'] > 0).astype(int)
         df_processed = df_processed.drop(columns=['num'])
-        y_true = df_processed['target'] # Store actual labels for evaluation
-        X_feats = df_processed.drop(columns=['target']) # Features for prediction
+        y_true = df_processed['target']  # Store actual labels for evaluation
+        X_feats = df_processed.drop(columns=['target'])  # Features for prediction
+    elif 'target' in df_processed.columns:
+        # Uploaded file already contains 'target' (0/1)
+        y_true = df_processed['target']
+        X_feats = df_processed.drop(columns=['target'])
+        st.info("Found 'target' column in uploaded file — using it as ground truth.")
     else:
-        st.info("Target variable 'num' not found in uploaded file. Running in prediction-only mode.")
+        st.info("Target variable 'num' or 'target' not found in uploaded file. Running in prediction-only mode.")
         y_true = None
         X_feats = df_processed.copy()
 
