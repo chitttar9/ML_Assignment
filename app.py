@@ -62,26 +62,36 @@ def preprocess_data(df_raw, scaler_obj, encoder_obj, numerical_feats, categorica
     y_true = df_processed['target'] # Store actual labels for evaluation
     X_feats = df_processed.drop(columns=['target']) # Features for prediction
 
-    # 3. Handle missing values (using mean for numerical, mode for categorical)
-    for col in numerical_feats:
-        if col in X_feats.columns:
-            X_feats[col] = X_feats[col].fillna(X_feats[col].mean())
+    # 3. Determine which expected features are present in the uploaded data
+    numerical_present = [c for c in numerical_feats if c in X_feats.columns]
+    categorical_present = [c for c in categorical_feats if c in X_feats.columns]
 
-    for col in categorical_feats:
-        if col in X_feats.columns:
+    # 4. Handle missing values (using mean for numerical, mode for categorical) on present features
+    for col in numerical_present:
+        X_feats[col] = X_feats[col].fillna(X_feats[col].mean())
+
+    for col in categorical_present:
+        # Guard against empty column when computing mode
+        if not X_feats[col].dropna().empty:
             X_feats[col] = X_feats[col].fillna(X_feats[col].mode()[0])
 
-    # 4. Apply StandardScaler to numerical features
-    if numerical_feats and not X_feats[numerical_feats].empty:
-        scaled_features = scaler_obj.transform(X_feats[numerical_feats])
-        scaled_df = pd.DataFrame(scaled_features, columns=numerical_feats, index=X_feats.index)
+    # 5. Apply StandardScaler to numerical features (only if present)
+    if numerical_present:
+        scaled_features = scaler_obj.transform(X_feats[numerical_present])
+        scaled_df = pd.DataFrame(scaled_features, columns=numerical_present, index=X_feats.index)
     else:
         scaled_df = pd.DataFrame(index=X_feats.index) # Empty dataframe if no numerical features
 
-    # 5. Apply OneHotEncoder to categorical features
-    if categorical_feats and not X_feats[categorical_feats].empty:
-        encoded_features = encoder_obj.transform(X_feats[categorical_feats])
-        encoded_feature_names = encoder_obj.get_feature_names_out(categorical_feats)
+    # 6. Apply OneHotEncoder to categorical features (only if present)
+    if categorical_present:
+        # Use only the present categorical columns when transforming
+        encoded_features = encoder_obj.transform(X_feats[categorical_present])
+        # Get feature names for the subset of categorical features
+        try:
+            encoded_feature_names = encoder_obj.get_feature_names_out(categorical_present)
+        except Exception:
+            # Fallback if encoder doesn't support get_feature_names_out for the subset
+            encoded_feature_names = [f"cat_{i}" for i in range(encoded_features.shape[1])]
         encoded_df = pd.DataFrame(encoded_features, columns=encoded_feature_names, index=X_feats.index)
     else:
         encoded_df = pd.DataFrame(index=X_feats.index) # Empty dataframe if no categorical features
