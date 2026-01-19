@@ -55,12 +55,12 @@ def preprocess_data(df_raw, scaler_obj, encoder_obj, numerical_feats, categorica
     if 'num' in df_processed.columns:
         df_processed['target'] = (df_processed['num'] > 0).astype(int)
         df_processed = df_processed.drop(columns=['num'])
+        y_true = df_processed['target'] # Store actual labels for evaluation
+        X_feats = df_processed.drop(columns=['target']) # Features for prediction
     else:
-        st.warning("Target variable 'num' not found in uploaded file. Assuming prediction mode.")
-        df_processed['target'] = -1 # Placeholder for prediction mode
-
-    y_true = df_processed['target'] # Store actual labels for evaluation
-    X_feats = df_processed.drop(columns=['target']) # Features for prediction
+        st.info("Target variable 'num' not found in uploaded file. Running in prediction-only mode.")
+        y_true = None
+        X_feats = df_processed.copy()
 
     # 3. Determine which expected features are present in the uploaded data
     numerical_present = [c for c in numerical_feats if c in X_feats.columns]
@@ -141,8 +141,11 @@ if uploaded_file is not None:
     X_test_processed, y_test_true = preprocess_data(df_uploaded, scaler, encoder, numerical_features_trained, categorical_features_trained)
 
     st.write("Preprocessed Features Shape:", X_test_processed.shape)
-    st.write("Target Labels Shape:", y_test_true.shape)
-    
+    if y_test_true is None:
+        st.write("No target labels found in upload — prediction-only mode.")
+    else:
+        st.write("Target Labels Shape:", y_test_true.shape)
+
     # Store processed data in session state for reuse
     st.session_state['X_test_processed'] = X_test_processed
     st.session_state['y_test_true'] = y_test_true
@@ -150,14 +153,18 @@ if uploaded_file is not None:
 
     st.success("Data preprocessed successfully!")
 
-    # Evaluate the selected model if data is ready
-    if st.session_state.get('data_ready', False):
-        st.write(f"Evaluating {selected_model_name} on uploaded data...")
-        model = models[selected_model_name]
-        
-        # Make predictions
-        y_pred = model.predict(st.session_state['X_test_processed'])
+    model = models[selected_model_name]
+    y_pred = model.predict(st.session_state['X_test_processed'])
 
+    # If no true labels, show predictions only and provide download
+    if y_test_true is None:
+        st.write(f"Predictions from {selected_model_name} (prediction-only mode):")
+        df_out = df_uploaded.copy()
+        df_out['prediction'] = y_pred
+        st.dataframe(df_out.head())
+        csv = df_out.to_csv(index=False).encode('utf-8')
+        st.download_button(label="Download predictions as CSV", data=csv, file_name='predictions.csv', mime='text/csv')
+    else:
         # Calculate metrics
         accuracy = accuracy_score(st.session_state['y_test_true'], y_pred)
         precision = precision_score(st.session_state['y_test_true'], y_pred, zero_division=0)
