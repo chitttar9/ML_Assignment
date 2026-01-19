@@ -45,20 +45,19 @@ def load_assets():
 def preprocess_data(df_raw, scaler_obj, encoder_obj, numerical_feats, categorical_feats):
     df_processed = df_raw.copy()
 
-    # 1. Drop 'id' and 'dataset' columns if they exist
+    # 1. Drop 'id' and 'dataset' columns if they exist (and other high-missing cols)
     cols_to_drop = ['id', 'dataset', 'ca', 'thal']
     for col in cols_to_drop:
         if col in df_processed.columns:
             df_processed = df_processed.drop(columns=[col])
-            
+
     # 2. Separate target variable if present ('num' from raw dataset or already-created 'target')
     if 'num' in df_processed.columns:
         df_processed['target'] = (df_processed['num'] > 0).astype(int)
         df_processed = df_processed.drop(columns=['num'])
-        y_true = df_processed['target']  # Store actual labels for evaluation
-        X_feats = df_processed.drop(columns=['target'])  # Features for prediction
+        y_true = df_processed['target']
+        X_feats = df_processed.drop(columns=['target'])
     elif 'target' in df_processed.columns:
-        # Uploaded file already contains 'target' (0/1)
         y_true = df_processed['target']
         X_feats = df_processed.drop(columns=['target'])
         st.info("Found 'target' column in uploaded file — using it as ground truth.")
@@ -67,48 +66,71 @@ def preprocess_data(df_raw, scaler_obj, encoder_obj, numerical_feats, categorica
         y_true = None
         X_feats = df_processed.copy()
 
-    # 3. Determine which expected features are present in the uploaded data
-    numerical_present = [c for c in numerical_feats if c in X_feats.columns]
-    categorical_present = [c for c in categorical_feats if c in X_feats.columns]
+    # 3. Ensure all expected numerical and categorical features exist in the dataframe.
+    #    If missing, create them with sensible defaults so that scaler/encoder can be applied.
+    # Numerical: if completely missing, fill with scaler's training mean if available, else 0.0
+    for i, col in enumerate(numerical_feats):
+        if col not in X_feats.columns:
+            fill_val = 0.0
+            if hasattr(scaler_obj, 'mean_') and len(getattr(scaler_obj, 'mean_', [])) > i:
+                try:
+                    fill_val = float(scaler_obj.mean_[i])
+                except Exception:
+                    fill_val = 0.0
+            X_feats[col] = fill_val
+        else:
+            X_feats[col] = X_feats[col].fillna(X_feats[col].mean())
 
-    # 4. Handle missing values (using mean for numerical, mode for categorical) on present features
-    for col in numerical_present:
-        X_feats[col] = X_feats[col].fillna(X_feats[col].mean())
+    # Categorical: if missing, create with a placeholder unseen category so encoder will handle it
+    for col in categorical_feats:
+        if col not in X_feats.columns:
+            X_feats[col] = 'MISSING'
+        else:
+            if not X_feats[col].dropna().empty:
+                X_feats[col] = X_feats[col].fillna(X_feats[col].mode()[0])
+            else:
+                X_feats[col] = 'MISSING'
 
-    for col in categorical_present:
-        # Guard against empty column when computing mode
-        if not X_feats[col].dropna().empty:
-            X_feats[col] = X_feats[col].fillna(X_feats[col].mode()[0])
+    # 4. Apply StandardScaler to numerical features (use full trained order)
+    try:
+        scaled_features = scaler_obj.transform(X_feats[numerical_feats])
+    except Exception:
+        # As a fallback, attempt to coerce to numeric and replace errors with 0
+        for col in numerical_feats:
+            X_feats[col] = pd.to_numeric(X_feats[col], errors='coerce').fillna(0.0)
+        scaled_features = scaler_obj.transform(X_feats[numerical_feats])
+    scaled_df = pd.DataFrame(scaled_features, columns=numerical_feats, index=X_feats.index)
 
-    # 5. Apply StandardScaler to numerical features (only if present)
-    if numerical_present:
-        scaled_features = scaler_obj.transform(X_feats[numerical_present])
-        scaled_df = pd.DataFrame(scaled_features, columns=numerical_present, index=X_feats.index)
-    else:
-        scaled_df = pd.DataFrame(index=X_feats.index) # Empty dataframe if no numerical features
+    # 5. Apply OneHotEncoder to categorical features (use full trained order)
+    #    OneHotEncoder expects the same number of input features as during fit.
+    try:
+        encoded_features = encoder_obj.transform(X_feats[categorical_feats])
+    except Exception:
+        # If transform fails, replace categorical columns with a placeholder and retry
+        for col in categorical_feats:
+            if col not in X_feats.columns:
+                X_feats[col] = 'MISSING'
+        encoded_features = encoder_obj.transform(X_feats[categorical_feats])
 
-    # 6. Apply OneHotEncoder to categorical features (only if present)
-    if categorical_present:
-        # Use only the present categorical columns when transforming
-        encoded_features = encoder_obj.transform(X_feats[categorical_present])
-        # Get feature names for the subset of categorical features
-        try:
-            encoded_feature_names = encoder_obj.get_feature_names_out(categorical_present)
-        except Exception:
-            # Fallback if encoder doesn't support get_feature_names_out for the subset
-            encoded_feature_names = [f"cat_{i}" for i in range(encoded_features.shape[1])]
-        encoded_df = pd.DataFrame(encoded_features, columns=encoded_feature_names, index=X_feats.index)
-    else:
-        encoded_df = pd.DataFrame(index=X_feats.index) # Empty dataframe if no categorical features
+    # Build encoded feature names robustly
+    try:
+        encoded_feature_names = encoder_obj.get_feature_names_out(categorical_feats)
+    except Exception:
+        # Fallback using categories_ attribute
+        encoded_feature_names = []
+        if hasattr(encoder_obj, 'categories_'):
+            for feat, cats in zip(categorical_feats, encoder_obj.categories_):
+                for cat in cats:
+                    encoded_feature_names.append(f"{feat}_{cat}")
+    encoded_df = pd.DataFrame(encoded_features, columns=encoded_feature_names, index=X_feats.index)
 
     # 6. Combine the scaled numerical features and one-hot encoded categorical features
     X_preprocessed = pd.concat([scaled_df, encoded_df], axis=1)
-    
-    # Ensure column order matches training data for consistency
-    # This part needs care, as column order from encoder can vary slightly or miss columns if test data lacks a category
-    # For simplicity, we assume `X_train` columns are available or ensure this is handled upstream
-    # A more robust solution would involve storing X_train.columns and reindexing here
-    # For now, let's assume `X_preprocessed` has all necessary columns due to `handle_unknown='ignore'`
+
+    # 7. Ensure column order matches training data: numerical_feats followed by encoder output columns
+    expected_cols = list(numerical_feats) + list(encoded_feature_names)
+    # Reindex to expected columns, adding missing columns filled with 0
+    X_preprocessed = X_preprocessed.reindex(columns=expected_cols, fill_value=0)
 
     return X_preprocessed, y_true
 
