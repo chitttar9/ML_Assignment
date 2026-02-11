@@ -148,6 +148,17 @@ st.success("Models and preprocessors loaded successfully!")
 
 # Placeholder for file uploader and model selection
 st.sidebar.header("Upload Test Data")
+
+# Add download button for test data
+if os.path.exists('test_set.csv'):
+    with open('test_set.csv', 'rb') as f:
+        st.sidebar.download_button(
+            label="📥 Download Test Data",
+            data=f,
+            file_name='test_set.csv',
+            mime='text/csv'
+        )
+
 uploaded_file = st.sidebar.file_uploader("Choose a CSV file", type="csv")
 
 st.sidebar.header("Model Selection")
@@ -159,8 +170,17 @@ selected_model_name = st.sidebar.selectbox(
 # Display evaluation results section
 st.subheader("Evaluation Results")
 
+# Use test_set.csv by default if no file is uploaded
 if uploaded_file is not None:
     df_uploaded = pd.read_csv(uploaded_file)
+    st.info("Using uploaded file for predictions.")
+elif os.path.exists('test_set.csv'):
+    df_uploaded = pd.read_csv('test_set.csv')
+    st.info("Using default test_set.csv for predictions.")
+else:
+    df_uploaded = None
+
+if df_uploaded is not None:
     st.write("Uploaded Data Preview:")
     st.dataframe(df_uploaded.head())
 
@@ -221,4 +241,4 @@ if uploaded_file is not None:
         st.text(confusion_matrix(st.session_state['y_test_true'], y_pred))
 
 else:
-    st.info("Please upload a CSV file to begin evaluation.")
+    st.warning("No test data available. Please upload a CSV file or ensure test_set.csv exists in the directory.")
