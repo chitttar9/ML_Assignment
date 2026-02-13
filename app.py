@@ -33,11 +33,12 @@ def load_assets():
     encoder_filepath = os.path.join(model_dir, 'encoder.joblib')
     encoder = joblib.load(encoder_filepath)
     
-    # Assuming the numerical and categorical features identified during training are consistent
-    # This should ideally be saved along with scaler/encoder for robustness
-    # For this example, let's hardcode them based on the training phase
+    # Feature lists must match exactly what was used during training
+    # Based on the preprocessing in the notebook:
+    # - Numerical columns after dropping 'id', 'dataset', 'ca', 'thal', and 'num'
+    # - Categorical columns are those with type 'object' in the original data
     numerical_features_trained = ['age', 'trestbps', 'chol', 'thalch', 'oldpeak']
-    categorical_features_trained = ['sex', 'cp', 'restecg', 'slope']
+    categorical_features_trained = ['sex', 'cp', 'fbs', 'restecg', 'exang', 'slope']
     
     return models, scaler, encoder, numerical_features_trained, categorical_features_trained
 
@@ -79,13 +80,22 @@ def preprocess_data(df_raw, scaler_obj, encoder_obj, numerical_feats, categorica
                     fill_val = 0.0
             X_feats[col] = fill_val
         else:
-            X_feats[col] = X_feats[col].fillna(X_feats[col].mean())
+            # Convert to numeric and fill missing values with mean
+            X_feats[col] = pd.to_numeric(X_feats[col], errors='coerce').fillna(X_feats[col].mean())
 
     # Categorical: if missing, create with a placeholder unseen category so encoder will handle it
+    # Also ensure boolean columns (fbs, exang) are converted to string for proper encoding
     for col in categorical_feats:
         if col not in X_feats.columns:
             X_feats[col] = 'MISSING'
         else:
+            # Convert boolean-like columns to string format for consistency
+            # Handle TRUE/FALSE, True/False, 1/0 formats
+            if col in ['fbs', 'exang']:
+                X_feats[col] = X_feats[col].astype(str).str.upper()
+            # Ensure column is treated as string/object type
+            X_feats[col] = X_feats[col].astype(str)
+            # Fill missing values with mode
             if not X_feats[col].dropna().empty:
                 X_feats[col] = X_feats[col].fillna(X_feats[col].mode()[0])
             else:
