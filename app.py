@@ -34,11 +34,12 @@ def load_assets():
     encoder = joblib.load(encoder_filepath)
     
     # Feature lists must match exactly what was used during training
-    # Based on the preprocessing in the notebook:
-    # - Numerical columns after dropping 'id', 'dataset', 'ca', 'thal', and 'num'
-    # - Categorical columns are those with type 'object' in the original data
+    # Based on the preprocessing output in the notebook:
+    # Numerical: ['age', 'trestbps', 'chol', 'thalch', 'oldpeak']
+    # Categorical: ['sex', 'cp', 'restecg', 'slope']
+    # Note: fbs and exang were imputed but not included in final feature set
     numerical_features_trained = ['age', 'trestbps', 'chol', 'thalch', 'oldpeak']
-    categorical_features_trained = ['sex', 'cp', 'fbs', 'restecg', 'exang', 'slope']
+    categorical_features_trained = ['sex', 'cp', 'restecg', 'slope']
     
     return models, scaler, encoder, numerical_features_trained, categorical_features_trained
 
@@ -46,8 +47,8 @@ def load_assets():
 def preprocess_data(df_raw, scaler_obj, encoder_obj, numerical_feats, categorical_feats):
     df_processed = df_raw.copy()
 
-    # 1. Drop 'id' and 'dataset' columns if they exist (and other high-missing cols)
-    cols_to_drop = ['id', 'dataset', 'ca', 'thal']
+    # 1. Drop columns that were not used in training
+    cols_to_drop = ['id', 'dataset', 'ca', 'thal', 'fbs', 'exang']
     for col in cols_to_drop:
         if col in df_processed.columns:
             df_processed = df_processed.drop(columns=[col])
@@ -84,15 +85,10 @@ def preprocess_data(df_raw, scaler_obj, encoder_obj, numerical_feats, categorica
             X_feats[col] = pd.to_numeric(X_feats[col], errors='coerce').fillna(X_feats[col].mean())
 
     # Categorical: if missing, create with a placeholder unseen category so encoder will handle it
-    # Also ensure boolean columns (fbs, exang) are converted to string for proper encoding
     for col in categorical_feats:
         if col not in X_feats.columns:
             X_feats[col] = 'MISSING'
         else:
-            # Convert boolean-like columns to string format for consistency
-            # Handle TRUE/FALSE, True/False, 1/0 formats
-            if col in ['fbs', 'exang']:
-                X_feats[col] = X_feats[col].astype(str).str.upper()
             # Ensure column is treated as string/object type
             X_feats[col] = X_feats[col].astype(str)
             # Fill missing values with mode
